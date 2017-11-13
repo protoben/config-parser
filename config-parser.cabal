@@ -33,9 +33,30 @@ extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
 library
+  ghc-options:         -Wall -Werror
   exposed-modules:     Text.ConfigParser
-  other-modules:       Text.ConfigParser.Util, Text.ConfigParser.Types, Text.ConfigParser.Parser
-  other-extensions:    ExistentialQuantification, RankNTypes
-  build-depends:       base >=4.9 && <4.10, parsec >=3.1 && <3.2
+  other-modules:       Text.ConfigParser.Util,
+                       Text.ConfigParser.Types,
+                       Text.ConfigParser.Parser
+  other-extensions:    ExistentialQuantification,
+                       RankNTypes,
+                       RecordWildCards
+  build-depends:       base   >=4.9 && <4.10,
+                       parsec >=3.1 && <3.2
   -- hs-source-dirs:      
   default-language:    Haskell2010
+
+test-suite parsing
+  ghc-options:         -Wall -Werror
+  other-modules:       Text.ConfigParser.Util,
+                       Text.ConfigParser.Types,
+                       Text.ConfigParser.Parser,
+                       Text.ConfigParser
+  type:                exitcode-stdio-1.0
+  main-is:             tests/Parsing.hs
+  default-language:    Haskell2010
+  build-depends:       base   >=4.9  && <4.10,
+                       hspec  >=2.4  && <2.5,
+                       lens   >=4.15 && <4.16,
+                       parsec >=3.1  && <3.2,
+                       text   >=1.2  && <1.3

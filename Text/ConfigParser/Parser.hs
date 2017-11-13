@@ -1,70 +1,121 @@
-module Text.ConfigParser.Parser
-    ( config
-    , string
-    , integer
-    , bool
-    , list
-    ) where
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+module Text.ConfigParser.Parser where
 
+import Control.Monad (void)
 import Data.String (IsString(..))
-import Text.Parsec (char, choice, digit, sepBy, many, many1, try, spaces)
-import Text.Parsec (eof, endOfLine, optional, (<|>), (<?>))
-import Text.Parsec.Char (noneOf, oneOf)
-import Text.Parsec.Text (GenParser, Parser)
+import Text.Parsec (SourceName, ParseError, State(..))
+import Text.Parsec (getParserState, setParserState, unexpected, newline)
+import Text.Parsec (manyTill, char, choice, digit, sepBy, many, many1, try)
+import Text.Parsec (spaces, eof, parse, (<|>), (<?>))
+import Text.Parsec.Char (noneOf, oneOf, anyChar)
+import Text.Parsec.Text (Parser)
 import qualified Text.Parsec as P (string)
 
 import Text.ConfigParser.Util
 import Text.ConfigParser.Types
 
+-- | Parse a string surrounded by quotes. Quotes within the string must be
+-- escaped with backslashes.
 string :: IsString s => Parser s
-string = char '"' *> fmap fromString (many escapedChar) <* char '"'
-             <?> "string in quotes"
+string = char '"' *> fmap fromString (many stringChar) <* char '"'
+     <?> "string in quotes"
     where
-    escapedChar = let escapables = "\"\n\\" in choice
-        [ noneOf escapables
-        , char '\\' *> oneOf escapables
-        ]
+    stringChar = noneOf "\"\n\\" <|> char '\\' *> escapeSeq
+    escapeSeq  = char '"' <|> char '\\' <|> '\n' <$ char 'n'
 
+-- | Parse an integer.
 integer :: Parser Integer
 integer = read .: (++) <$> sign <*> many1 digit <?> "integer"
     where
     sign = P.string "-" <|> P.string ""
 
+-- | Parse a bounded integer. Fail to parse with a descriptive message if the
+-- value is out of bounds.
+boundedIntegral :: forall n. (Show n, Bounded n, Integral n) => Parser n
+boundedIntegral = bound =<< integer
+              <?> "integer between " ++ show intMin ++ " and " ++ show intMax
+    where
+    intMin  = minBound :: n
+    intMax  = maxBound :: n
+    bound n | n > fromIntegral intMax = unexpected $ "integer above " ++ show intMax
+            | n < fromIntegral intMin = unexpected $ "integer below " ++ show intMin
+
+            | otherwise    = return $ fromIntegral n
+
+-- | Parse a boolean. Valid synonyms for @True@ are @true@, @yes@, @Yes@, @on@,
+-- and @On@. Valid synonyms for @False@ are @false@, @no@, @No@, @off@, and
+-- @Off@.
 bool :: Parser Bool
-bool = True <$ truthy <|> False <$ falsey
+bool = True <$ try truthy <|> False <$ try falsey
     where
     truthy = choice $ fmap P.string ["true", "True", "yes", "Yes", "on", "On"]
     falsey = choice $ fmap P.string ["false", "False", "no", "No", "off", "Off"]
 
+-- | Parse a list of values surrounded by @[@ and @]@, and separated by commas.
+-- The list can contain whitespace and newlines.
 list :: (Parser a) -> Parser [a]
-list p =
-    initial *> (p `sepBy` separator) <* terminator <?> "list in brackets"
+list p = initial *> (p `sepBy` separator) <* terminator <?> "list in brackets"
     where
     initial    = try $ char '[' <* spaces
     separator  = try $ spaces *> char ',' <* spaces
     terminator = try $ spaces *> char ']'
 
+-- | Ignore zero or more spaces, tabs, or vertical tabs.
 whitespace :: Parser ()
-whitespace = () <$ many (oneOf " \t") <?> "whitespace"
+whitespace = () <$ many (oneOf " \t\v\r") <?> "whitespace"
 
-lineEnd :: String -> Parser ()
-lineEnd commentMarker = () <$ whitespace <* optional comment <* terminator
-    where
-    comment    = commentParser commentMarker
-    terminator = endOfLine <?> "end of line"
-
-commentParser :: String -> Parser ()
-commentParser marker = () <$ P.string marker <* many (noneOf "\n") <?> "line comment"
-
+-- | Extract a parser for a transformation on c's from a 'ConfigOption'.
 actionParser :: ConfigParser c -> ConfigOption c -> Parser (c -> c)
-actionParser c (ConfigOption k p a) = lineParser c k $ a <$> p
+actionParser c ConfigOption {..} =
+    whitespace *> keyValue c key (action <$> parser)
 
-config :: ConfigParser c -> Parser c
-config c = foldr ($) (defaults c) <$> (fileStart *> file <* fileEnd)
+-- Parse a string and replace the input of the parser with the result.
+replaceParserInput :: Parser String -> Parser ()
+replaceParserInput p = do
+    s <- getParserState
+    i <- p
+    void $ setParserState s {stateInput = fromString i}
+
+-- Replace each line comment with a single newline.
+removeLineComments :: ConfigParser c -> Parser ()
+removeLineComments ConfigParser {..} = replaceParserInput $
+    mconcat <$> many (escapedComment <|> comment <|> content)
     where
-    fileStart  = try $ many emptyLines
-    file       = keyValue `sepBy` emptyLines
-    fileEnd    = try (many emptyLines) *> optional whitespace *> optional comment *> eof
-    comment    = commentParser $ commentStart c
-    keyValue   = choice $ try . actionParser c <$> options c
-    emptyLines = many1 $ lineEnd (commentStart c)
+    startComment   = choice $ try . P.string <$> lineCommentInit
+    terminator     = void newline <|> eof
+    comment        = '\n':[] <$ startComment <* anyChar `manyTill` terminator
+    escapedComment = try $ char '\\' *> startComment
+    content        = (:[]) <$> anyChar
+
+-- Remove spaces from the start and end of each line, at the start of the
+-- input, and at the end of the input.
+removeExtraSpaces :: Parser ()
+removeExtraSpaces = replaceParserInput $
+    whitespace *> contentChar `manyTill` try (whitespace *> eof)
+    where
+    contentChar = try strippedNL <|> anyChar
+    strippedNL  = whitespace *> newline <* whitespace
+
+-- Replace sequences of multiple newlines with a single newline.
+removeExtraLines :: Parser ()
+removeExtraLines = replaceParserInput $
+    optionalNLs *> contentChar `manyTill` try (optionalNLs *> eof)
+    where
+    contentChar = combinedNLs <|> anyChar
+    optionalNLs = ()   <$ many newline
+    combinedNLs = '\n' <$ many1 newline
+
+-- Parse a config file as specified by a 'ConfigParser'.
+config :: ConfigParser c -> Parser c
+config p = foldr ($) (defaults p) <$> do
+    removeLineComments p
+    removeExtraSpaces
+    removeExtraLines
+    optionParsers `sepBy` newline <* eof
+    where
+    optionParsers = choice $ try . actionParser p <$> options p
+
+-- Parse a config file from disk.
+parseFromFile :: ConfigParser c -> SourceName -> IO (Either ParseError c)
+parseFromFile p f = parse (config p) f . fromString <$> readFile f

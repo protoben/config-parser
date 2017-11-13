@@ -1,6 +1,21 @@
 module Text.ConfigParser
-    ( module X
+    ( module Types
+    , module Parser
     ) where
 
-import Text.ConfigParser.Types as X
-import Text.ConfigParser.Parser as X
+import Text.ConfigParser.Types as Types
+    ( Key
+    , ConfigOption
+    , ConfigParser
+    , configParser_
+    , configParser
+    , defaultKeyValue
+    , defaultLineCommentInit
+    )
+import Text.ConfigParser.Parser as Parser
+    ( config
+    , string
+    , integer
+    , bool
+    , list
+    )
