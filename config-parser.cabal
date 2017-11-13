@@ -1,5 +1,5 @@
 name:                config-parser
-version:             0.1.0.5
+version:             0.1.0.6
 synopsis:            Parse config files using parsec and generate parse errors
                      on unhandled keys
 description:         This is yet another entry in Haskell's enourmous collection
@@ -23,7 +23,7 @@ description:         This is yet another entry in Haskell's enourmous collection
                      probably better libraries out there for you. If you're free
                      to use its idiosyncratic file format, the config-value
                      library, in particular, is excelent.
-homepage:            github.com/protoben/config-parser
+homepage:            https://github.com/protoben/config-parser
 license:             MIT
 license-file:        LICENSE
 author:              Ben Hamlin
