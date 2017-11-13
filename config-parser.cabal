@@ -1,5 +1,5 @@
 name:                config-parser
-version:             0.1.0.4
+version:             0.1.0.5
 synopsis:            Parse config files using parsec and generate parse errors
                      on unhandled keys
 description:         This is yet another entry in Haskell's enourmous collection

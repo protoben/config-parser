@@ -63,11 +63,21 @@ as follows:
 -}
 {-# OPTIONS_HADDOCK ignore_exports #-}
 module Text.ConfigParser
-    ( module Types
-    , module Parser
+    ( Key
+    , ConfigOption
+    , ConfigParser
+    , configParser_
+    , configParser
+    , defaultKeyValue
+    , defaultLineCommentInit
+    , config
+    , string
+    , integer
+    , bool
+    , list
     ) where
 
-import Text.ConfigParser.Types as Types
+import Text.ConfigParser.Types
     ( Key
     , ConfigOption
     , ConfigParser
@@ -76,7 +86,8 @@ import Text.ConfigParser.Types as Types
     , defaultKeyValue
     , defaultLineCommentInit
     )
-import Text.ConfigParser.Parser as Parser
+
+import Text.ConfigParser.Parser
     ( config
     , string
     , integer
