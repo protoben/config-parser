@@ -16,8 +16,9 @@ import Text.Parsec (parse, errorPos, sourceLine, eof, getInput, spaces)
 import Text.Parsec.Text (Parser)
 import qualified Text.Parsec as P (string)
 
-import Text.ConfigParser.Types
-import Text.ConfigParser.Parser
+import Text.ConfigParser
+import Text.ConfigParser.Parser (whitespace, actionParser, removeLineComments)
+import Text.ConfigParser.Parser (removeExtraSpaces, removeExtraLines)
 
 data C = C
     { _f1 :: String
@@ -27,6 +28,7 @@ data C = C
     , _f5 :: [Integer]
     , _f6 :: [Bool]
     , _f7 :: [[Integer]]
+    , _f8 :: Integer
     } deriving (Show, Eq)
 
 makeLenses ''C
@@ -40,56 +42,68 @@ defC = C
     , _f5 = []
     , _f6 = []
     , _f7 = []
+    , _f8 = 0
     }
 
-co1,co2,co3,co4,co5,co6,co7 :: ConfigOption C
+co1,co2,co3,co4,co5,co6,co7,co8 :: ConfigOption C
 co1 = ConfigOption
-  { key    = "f1"
-  , action = set' f1
-  , parser = string
+  { key      = "f1"
+  , required = False
+  , action   = set' f1
+  , parser   = string
   }
 co2 = ConfigOption
-  { key    = "f2"
-  , action = set' f2
-  , parser = integer
+  { key      = "f2"
+  , required = False
+  , action   = set' f2
+  , parser   = integer
   }
 co3 = ConfigOption
-  { key    = "f3"
-  , action = set' f3
-  , parser = bool
+  { key      = "f3"
+  , required = False
+  , action   = set' f3
+  , parser   = bool
   }
 co4 = ConfigOption
-  { key    = "f4"
-  , action = set' f4
-  , parser = list string
+  { key      = "f4"
+  , required = False
+  , action   = set' f4
+  , parser   = list string
   }
 co5 = ConfigOption
-  { key    = "f5"
-  , action = set' f5
-  , parser = list integer
+  { key      = "f5"
+  , required = False
+  , action   = set' f5
+  , parser   = list integer
   }
 co6 = ConfigOption
-  { key    = "f6"
-  , action = set' f6
-  , parser = list bool
+  { key      = "f6"
+  , required = False
+  , action   = set' f6
+  , parser   = list bool
   }
 co7 = ConfigOption
-  { key    = "f7"
-  , action = set' f7
-  , parser = list (list integer)
+  { key      = "f7"
+  , required = False
+  , action   = set' f7
+  , parser   = list (list integer)
+  }
+co8 = ConfigOption
+  { key      = "f8"
+  , required = True
+  , action   = set' f8
+  , parser   = integer
   }
 
-cp, cp' :: ConfigParser C
-cp  = configParser defC [co1,co2,co3,co4,co5,co6,co7]
-cp' = configParser_ lp lcs defC [co1,co2,co3,co4,co5,co6,co7]
+cp, cp', badcp, reqcp :: ConfigParser C
+reqcp = configParser defC [co1,co2,co3,co4,co5,co6,co7,co8]
+badcp = configParser defC [co1,co2,co2,co4,co5,co6,co7]
+cp    = configParser defC [co1,co2,co3,co4,co5,co6,co7]
+cp'   = ConfigParser lp lcs defC [co1,co2,co3,co4,co5,co6,co7]
     where
     lp :: Key -> Parser a -> Parser a
     lp k q = q <* spaces <* P.string "->" <* spaces <* P.string k
     lcs    = ["--","//"]
-
-p, p' :: Parser C
-p  = config cp
-p' = config cp'
 
 shouldFailOnLine :: Show a => Either ParseError a -> Int -> Expectation
 shouldFailOnLine e n = case e of
@@ -414,22 +428,23 @@ testRemoveExtraLines = describe "removeExtraLines" $ do
 testConfig :: Spec
 testConfig = describe "config" $ do
     it "parses an empty config file" $
-        parse p "test" "" `shouldBe` Right defC
+        parseFromText cp "test" "" `shouldBe` Right defC
     it "parses a config file with just empty lines" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ ""
             , "\t"
             , " "
             ]) `shouldBe` Right defC
     it "parses a config file with just a line comment" $ do
-        parse p "test" "# foo" `shouldBe` Right defC
+        parseFromText cp "test" "# foo" `shouldBe` Right defC
     it "parses a config file with just one line" $
-        parse p "test" "f1 = \"foo\"" `shouldBe` Right defC {_f1 = "foo"}
+        parseFromText cp "test" "f1 = \"foo\""
+            `shouldBe` Right defC {_f1 = "foo"}
     it "parses a string with escape sequences in it" $
-        parse p "test" "f1 = \"foo\\n\\\"\\\\\""
+        parseFromText cp "test" "f1 = \"foo\\n\\\"\\\\\""
             `shouldBe` Right defC {_f1 = "foo\n\"\\"}
     it "parses multiple in-order options from a config file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -443,7 +458,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "parses multiple out-of-order options from a config file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f4 = [\"foo\",\"bar\"]"
             , "f2 = 9001"
             , "f1 = \"foo\""
@@ -457,7 +472,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows a comment at the top of a config file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "# I'm a comment"
             , "f1 = \"foo\""
             , "f2 = 9001"
@@ -472,7 +487,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows a comment in the middle of a config file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -487,7 +502,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows a comment at the end of a config file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -502,7 +517,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows a comment at the end of a line" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True # I'm a comment"
@@ -516,7 +531,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows a comment at the end of a line and file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -530,7 +545,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows a newline at the top of a config file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ ""
             , "f1 = \"foo\""
             , "f2 = 9001"
@@ -545,7 +560,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows a newline in the middle of a config file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -560,7 +575,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows a newline at the end of a config file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -575,7 +590,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows whitespace at the start of a line" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "   \r\v\tf3 = True"
@@ -589,7 +604,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows whitespace at the start of a line and file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "   \r\v\tf1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -603,7 +618,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows whitespace at the end of a line" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True   \r\v\t"
@@ -617,7 +632,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows whitespace at the end of a line and file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -631,7 +646,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows empty lines at the start of a file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "   \r\v\t"
             , ""
             , ""
@@ -648,7 +663,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows empty lines in the middle of a file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "   \r\v\t"
@@ -665,7 +680,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "allows empty lines at the end of a file" $
-        parse p "test" (unlines
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True"
@@ -682,7 +697,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "parses an alternative key-value syntax" $
-        parse p' "test" (unlines
+        parseFromText cp' "test" (unlines
             [ "\"foo\"           -> f1"
             , "9001              -> f2"
             , "True              -> f3"
@@ -696,7 +711,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "parses an alternative comment syntax" $
-        parse p' "test" (unlines
+        parseFromText cp' "test" (unlines
             [ "\"foo\"           -> f1"
             , "9001              -> f2"
             , "True              -> f3"
@@ -711,7 +726,7 @@ testConfig = describe "config" $ do
                 , _f5 = [1,2,3,4,5]
                 }
     it "parses an multiple comment syntaxes" $
-        parse p' "test" (unlines
+        parseFromText cp' "test" (unlines
             [ "\"foo\"           -> f1"
             , "9001              -> f2"
             , "True              -> f3"
@@ -725,12 +740,35 @@ testConfig = describe "config" $ do
                 , _f4 = ["foo","bar"]
                 , _f5 = [1,2,3,4,5]
                 }
-    it "errors on non-existent keys" $
-        parse p "test" (unlines
+    it "errors on non-unique keys in ConfigParser with a pertinent message" $
+        parseFromText badcp "test" ""
+            `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine (errorPos e) == 1
+                        && "non-unique keys in ConfigParser" `elem` lines (show e)
+    it "errors with a pertinent message when required key is omitted" $
+        parseFromText reqcp "test" "f1 = \"foo\""
+            `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine (errorPos e) == 1
+                        && "missing required keys: \"f8\"" `elem` lines (show e)
+    it "errors on non-existent keys with a pertinent message" $
+        parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
             , "f3 = True   "
             , "f4 = [\"foo\",\"bar\"]"
             , "f5 = [1,2,3,4,5]"
             , "badkey = 9999"
-            ]) `shouldFailOnLine` 6
+            ]) `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine (errorPos e) == 6
+                        && "unexpected key: \"badkey\"" `elem` lines (show e)
+    it "errors on duplicate keys in config file with a pertinent message" $
+        parseFromText cp "test" (unlines
+            [ "f1 = \"foo\""
+            , "f1 = \"bar\""
+            ]) `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine (errorPos e) == 2
+                        && "unexpected duplicate key: \"f1\"" `elem` lines (show e)

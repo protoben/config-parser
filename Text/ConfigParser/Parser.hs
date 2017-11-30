@@ -2,14 +2,17 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Text.ConfigParser.Parser where
 
-import Control.Monad (void)
+import Control.Monad (void, unless, when)
+import Data.List (nub, (\\), intercalate)
 import Data.String (IsString(..))
-import Text.Parsec (SourceName, ParseError, State(..))
-import Text.Parsec (getParserState, setParserState, unexpected, newline)
+import Text.Parsec (SourceName, ParseError, State(..), parserFail, alphaNum)
+import Text.Parsec (getParserState, setParserState, unexpected, newline, unexpected)
 import Text.Parsec (manyTill, char, choice, digit, sepBy, many, many1, try)
 import Text.Parsec (spaces, eof, parse, (<|>), (<?>))
 import Text.Parsec.Char (noneOf, oneOf, anyChar)
 import Text.Parsec.Text (Parser)
+import qualified Data.Text as T (Text)
+import qualified Data.Text.IO as T (readFile)
 import qualified Text.Parsec as P (string)
 
 import Text.ConfigParser.Util
@@ -40,8 +43,7 @@ boundedIntegral = bound =<< integer
     intMax  = maxBound :: n
     bound n | n > fromIntegral intMax = unexpected $ "integer above " ++ show intMax
             | n < fromIntegral intMin = unexpected $ "integer below " ++ show intMin
-
-            | otherwise    = return $ fromIntegral n
+            | otherwise               = return $ fromIntegral n
 
 -- | Parse a boolean. Valid synonyms for @True@ are @true@, @yes@, @Yes@, @on@,
 -- and @On@. Valid synonyms for @False@ are @false@, @no@, @No@, @off@, and
@@ -65,7 +67,7 @@ list p = initial *> (p `sepBy` separator) <* terminator <?> "list in brackets"
 whitespace :: Parser ()
 whitespace = () <$ many (oneOf " \t\v\r") <?> "whitespace"
 
--- | Extract a parser for a transformation on c's from a 'ConfigOption'.
+-- | Extract a parser for a transformation on @c@s from a 'ConfigOption'.
 actionParser :: ConfigParser c -> ConfigOption c -> Parser (c -> c)
 actionParser c ConfigOption {..} =
     whitespace *> keyValue c key (action <$> parser)
@@ -108,14 +110,35 @@ removeExtraLines = replaceParserInput $
 
 -- Parse a config file as specified by a 'ConfigParser'.
 config :: ConfigParser c -> Parser c
-config p = foldr ($) (defaults p) <$> do
+config p = do
+    unless optionKeysUniq $
+        parserFail "non-unique keys in ConfigParser"
     removeLineComments p
     removeExtraSpaces
     removeExtraLines
-    optionParsers `sepBy` newline <* eof
+    (ks,c) <- go [] (defaults p)
+    let missingKeys = requiredKeys \\ ks
+    unless (null missingKeys) $
+        parserFail ("missing required keys: " ++ intercalate ", " (fmap show missingKeys))
+    return c
     where
-    optionParsers = choice $ try . actionParser p <$> options p
+    actionParser' o = (,) (key o) <$> actionParser p o
+    optionParser    = choice $ try . actionParser' <$> options p
+    requiredKeys    = fmap key . filter required $ options p
+    optionKeysUniq  = length (nub $ key <$> options p) == length (options p)
+    go ks c = (ks,c) <$ eof <|> do
+        (k,f) <- optionParser <|> do
+            k <- many1 alphaNum
+            unexpected $ "key: \"" ++ k ++ "\""
+        when (k `elem` (ks::[Key])) $
+            unexpected ("duplicate key: \"" ++ k ++ "\"")
+        let c' = f c
+        newline *> go (k:ks) c' <|> (k:ks,c') <$ eof
+
+-- Parse a config file from 'Text'.
+parseFromText :: ConfigParser c -> SourceName -> T.Text -> Either ParseError c
+parseFromText = parse . config
 
 -- Parse a config file from disk.
 parseFromFile :: ConfigParser c -> SourceName -> IO (Either ParseError c)
-parseFromFile p f = parse (config p) f . fromString <$> readFile f
+parseFromFile p f = parseFromText p f <$> T.readFile f
