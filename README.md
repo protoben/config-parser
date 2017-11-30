@@ -31,19 +31,22 @@ import Text.ConfigParser
 cp :: ConfigParser (Maybe String, Maybe Integer, [Integer])
 cp = configParser (Nothing, Nothing, [])
     [ ConfigOption
-        { key    = "a_string"
-        , parser = string
-        , action = \s (_,n,ns) -> (Just s, n, ns)
+        { key      = "a_string"
+        , required = True
+        , parser   = string
+        , action   = \s (_,n,ns) -> (Just s, n, ns)
         }
     , ConfigOption
-        { key    = "a_number"
-        , parser = integer
-        , action = \n (s,_,ns) -> (s, Just n, ns)
+        { key      = "a_number"
+        , required = True
+        , parser   = integer
+        , action   = \n (s,_,ns) -> (s, Just n, ns)
         }
     , ConfigOption
-        { key    = "a_list"
-        , parser = list integer
-        , action = \ns (s,n,_) -> (s, n, ns)
+        { key      = "a_list"
+        , required = True
+        , parser   = list integer
+        , action   = \ns (s,n,_) -> (s, n, ns)
         }
     ]
 
