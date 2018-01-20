@@ -9,10 +9,10 @@ import Control.Lens
 import Data.Int (Int8)
 import Data.List.Extra (isInfixOf)
 import Data.Text (unlines)
-import Data.Word (Word8)
+import Data.Word (Word8, Word16)
 import Test.Hspec
-import Text.Parsec (ParseError)
-import Text.Parsec (parse, errorPos, sourceLine, eof, getInput, spaces)
+import Text.Parsec (ParseError, errorPos, sourceLine, sourceColumn)
+import Text.Parsec (parse, eof, getInput, spaces)
 import Text.Parsec.Text (Parser)
 import qualified Text.Parsec as P (string)
 
@@ -21,7 +21,7 @@ import Text.ConfigParser.Parser (removeLineComments)
 
 data C = C
     { _f1 :: String
-    , _f2 :: Integer
+    , _f2 :: Word16
     , _f3 :: Bool
     , _f4 :: [String]
     , _f5 :: [Integer]
@@ -55,7 +55,7 @@ co2 = ConfigOption
   { key      = "f2"
   , required = False
   , action   = set' f2
-  , parser   = integer
+  , parser   = boundedIntegral
   }
 co3 = ConfigOption
   { key      = "f3"
@@ -658,13 +658,42 @@ testConfig = describe "config" $ do
             `shouldSatisfy` \res -> case res of
                 Right _ -> False
                 Left  e -> sourceLine (errorPos e) == 1
-                        && "non-unique keys in ConfigParser" `elem` lines (show e)
+                        && "non-unique keys in ConfigParser" `isInfixOf` show e
+    it "errors appropriately when full value can't be parsed in middle of file" $
+        parseFromText cp "test" (unlines
+            [ "f2 = 9001foo"
+            , "f3 = True"
+            ]) `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && sourceColumn (errorPos e) == 10
+    it "errors appropriately when full value can't be parsed at end of file" $
+        parseFromText cp "test" (unlines
+            [ "f1 = \"blah\""
+            , "f2 = 9001foo"
+            ]) `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 2
+                        && sourceColumn (errorPos e) == 10
+    it "errors appropriately when options aren't separated by a newline" $
+        parseFromText cp "test" "f1 = \"blah\"f2 = 9001"
+            `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && sourceColumn (errorPos e) == 12
+    it "errors with a pertinent message when bounded integer is out of bounds" $
+        parseFromText reqcp "test" "f2 = 65536"
+            `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && "integer above 65535"         `isInfixOf` show e
+                        && "integer between 0 and 65535" `isInfixOf` show e
     it "errors with a pertinent message when required key is omitted" $
         parseFromText reqcp "test" "f1 = \"foo\""
             `shouldSatisfy` \res -> case res of
                 Right _ -> False
                 Left  e -> sourceLine (errorPos e) == 1
-                        && "missing required keys: \"f8\"" `elem` lines (show e)
+                        && "missing required keys: \"f8\"" `isInfixOf` show e
     it "errors on non-existent keys with a pertinent message" $
         parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
@@ -675,13 +704,15 @@ testConfig = describe "config" $ do
             , "badkey = 9999"
             ]) `shouldSatisfy` \res -> case res of
                 Right _ -> False
-                Left  e -> sourceLine (errorPos e) == 6
-                        && "unexpected key \"badkey\"" `isInfixOf` show e
+                Left  e -> sourceLine   (errorPos e) == 6
+                        && sourceColumn (errorPos e) == 1
+                        && "unknown key \"badkey\"" `isInfixOf` show e
     it "errors on duplicate keys in config file with a pertinent message" $
         parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f1 = \"bar\""
             ]) `shouldSatisfy` \res -> case res of
                 Right _ -> False
-                Left  e -> sourceLine (errorPos e) == 2
+                Left  e -> sourceLine   (errorPos e) == 2
+                        && sourceColumn (errorPos e) == 1
                         && "duplicate key \"f1\"" `isInfixOf` show e
