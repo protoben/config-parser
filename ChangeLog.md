@@ -1,5 +1,11 @@
 # Revision history for config-parser
 
+## 1.1.0.1  -- 2018-1-20
+
+* Fixed some unexpected parsing behavior w/r/t line-ends.
+* Made bounded parser fail before consuming input so descriptive expectation is
+  shown in error message.
+
 ## 1.1.0.0  -- 2018-1-19
 
 * Made parsing errors significantly more informative.
