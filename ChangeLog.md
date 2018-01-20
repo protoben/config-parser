@@ -1,5 +1,12 @@
 # Revision history for config-parser
 
+## 1.1.0.0  -- 2018-1-19
+
+* Made parsing errors significantly more informative.
+* The `keyValue` parser in `ConfigParser` now takes a `Parser Key`, rather than
+  a `Key`, to facilitate easier detection of bad keys.
+* Fixed some broken haddocks.
+
 ## 1.0.0.0  -- 2017-12-04
 
 * Removed 'ConfigParser' constructor with janky call to 'error'. Non-unique keys
