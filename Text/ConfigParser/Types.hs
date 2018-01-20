@@ -8,7 +8,7 @@ import Text.Parsec.Text (Parser)
 
 type Key = String
 
--- Key-value pair to parse from a config file.
+-- ^ Key-value pair to parse from a config file.
 data ConfigOption c
     = forall a. ConfigOption
         { key      :: Key         -- ^ Key name.
@@ -29,14 +29,14 @@ data ConfigParser c = ConfigParser
       -- ^ Specifies how a key and a value parser should be represented in the
       -- config file, e.g., @key = value@, or @key: value@.
     , lineCommentInit :: [String]
-      -- Strings to start a line comment, such as @#@, @--@, or @//@. All
+      -- ^ Strings to start a line comment, such as @#@, @--@, or @//@. All
       -- characters following this string up to the following newline or EOF
       -- will be removed. You can use the string without starting a comment by
       -- escaping it with a backslash, e.g. @\#@ or @\--@.
     , defaults :: c
-      -- Initial @c@ to fold each 'ConfigOption's action over.
+      -- ^ Initial @c@ to fold each 'ConfigOption's action over.
     , options :: [ConfigOption c]
-      -- List of key-value pairs to parse from the config file. Any key in the
+      -- ^ List of key-value pairs to parse from the config file. Any key in the
       -- config file that doesn't appear here will result in parse error.
     }
 
