@@ -1,15 +1,19 @@
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_HADDOCK hide #-}
 module Text.ConfigParser.Parser where
 
 import Control.Monad (void, unless, when)
 import Data.List (nub, (\\), intercalate)
 import Data.String (IsString(..))
-import Text.Parsec (SourceName, ParseError, State(..), parserFail, alphaNum)
-import Text.Parsec (getParserState, setParserState, unexpected, newline, unexpected)
-import Text.Parsec (manyTill, char, choice, digit, sepBy, many, many1, try)
-import Text.Parsec (spaces, eof, parse, (<|>), (<?>))
+import Text.Parsec (ParseError, unexpected, parserFail)
+import Text.Parsec (newline, manyTill, char, choice, digit, sepBy, many, many1)
+import Text.Parsec (try, spaces, eof, parse, (<|>), (<?>), lookAhead)
 import Text.Parsec.Char (noneOf, oneOf, anyChar)
+import Text.Parsec.Pos (SourceName, initialPos, sourceName)
+import Text.Parsec.Prim (setInput, getPosition, setPosition)
 import Text.Parsec.Text (Parser)
 import qualified Data.Text as T (Text)
 import qualified Data.Text.IO as T (readFile)
@@ -63,23 +67,15 @@ list p = initial *> (p `sepBy` separator) <* terminator <?> "list in brackets"
     separator  = try $ spaces *> char ',' <* spaces
     terminator = try $ spaces *> char ']'
 
--- | Ignore zero or more spaces, tabs, or vertical tabs.
-whitespace :: Parser ()
-whitespace = () <$ many (oneOf " \t\v\r") <?> "whitespace"
-
--- | Extract a parser for a transformation on @c@s from a 'ConfigOption'.
-actionParser :: ConfigParser c -> ConfigOption c -> Parser (c -> c)
-actionParser c ConfigOption {..} =
-    whitespace *> keyValue c key (action <$> parser)
-
--- Parse a string and replace the input of the parser with the result.
+-- | Parse a string and replace the input of the parser with the result.
 replaceParserInput :: Parser String -> Parser ()
-replaceParserInput p = do
-    s <- getParserState
-    i <- p
-    void $ setParserState s {stateInput = fromString i}
+replaceParserInput parser = void $ do
+    input  <- parser
+    source <- sourceName <$> getPosition
+    setInput    $ fromString input
+    setPosition $ initialPos source
 
--- Replace each line comment with a single newline.
+-- | Replace each line comment with a single newline.
 removeLineComments :: ConfigParser c -> Parser ()
 removeLineComments ConfigParser {..} = replaceParserInput $
     mconcat <$> many (escapedComment <|> comment <|> content)
@@ -90,50 +86,50 @@ removeLineComments ConfigParser {..} = replaceParserInput $
     escapedComment = try $ char '\\' *> startComment
     content        = (:[]) <$> anyChar
 
--- Remove spaces from the start and end of each line, at the start of the
--- input, and at the end of the input.
-removeExtraSpaces :: Parser ()
-removeExtraSpaces = replaceParserInput $
-    whitespace *> contentChar `manyTill` try (whitespace *> eof)
-    where
-    contentChar = try strippedNL <|> anyChar
-    strippedNL  = whitespace *> newline <* whitespace
-
--- Replace sequences of multiple newlines with a single newline.
-removeExtraLines :: Parser ()
-removeExtraLines = replaceParserInput $
-    optionalNLs *> contentChar `manyTill` try (optionalNLs *> eof)
-    where
-    contentChar = combinedNLs <|> anyChar
-    optionalNLs = ()   <$ many newline
-    combinedNLs = '\n' <$ many1 newline
-
--- Parse a config file as specified by a 'ConfigParser'.
+-- | Parse a config file as specified by a 'ConfigParser'.
 config :: ConfigParser c -> Parser c
 config p = do
     unless optionKeysUniq $
         parserFail "non-unique keys in ConfigParser"
     removeLineComments p
-    removeExtraSpaces
-    removeExtraLines
-    (ks,c) <- go [] (defaults p)
+    (ks,c) <- go ([]::[Key]) (defaults p)
     let missingKeys = requiredKeys \\ ks
     unless (null missingKeys) $
         parserFail ("missing required keys: " ++ intercalate ", " (fmap show missingKeys))
     return c
     where
-    actionParser' o = (,) (key o) <$> actionParser p o
-    optionParser    = choice $ try . actionParser' <$> options p
-    requiredKeys    = fmap key . filter required $ options p
-    optionKeysUniq  = length (nub $ key <$> options p) == length (options p)
-    go ks c = (ks,c) <$ eof <|> do
-        (k,f) <- optionParser <|> do
-            k <- many1 alphaNum
-            unexpected $ "key: \"" ++ k ++ "\""
-        when (k `elem` (ks::[Key])) $
-            unexpected ("duplicate key: \"" ++ k ++ "\"")
-        let c' = f c
-        newline *> go (k:ks) c' <|> (k:ks,c') <$ eof
+    whitespace     = void . many  $ oneOf " \t\v\r"     :: Parser ()
+    line           =        many  $ noneOf "\n\r"       :: Parser String
+    identifier     =        many1 $ noneOf "\n\r\t\v =" :: Parser String
+    requiredKeys   = fmap key . filter required $ options p
+    optionKeysUniq = length (nub $ key <$> options p) == length (options p)
+    maybeP parser  = Just <$> try parser <|> Nothing <$ try identifier
+    optionParsers  = choice $ try . keyActionP <$> options p
+    dummyActionP   = (Nothing,Nothing) <$ keyValue p identifier (try line)
+    configLineP    = optionParsers <|> dummyActionP <|> parserFail "Parsing failed"
+    keyActionP o   = (Just o,) <$> mbActionParser o
+    actionParser   ConfigOption {..} = keyValue p (P.string key) $ action <$> parser
+    mbActionParser ConfigOption {..} = keyValue p (P.string key) . maybeP $ action <$> parser
+    go  ks c = whitespace *> go' ks c <* whitespace
+    go' ks c = (ks,c) <$ eof     -- End of document
+          <|> newline *> go ks c -- Empty line
+          <|> do                 -- Config line
+            (mbo,mbv) <- lookAhead configLineP
+            case mbo of
+                -- Key is bad
+                Nothing -> do 
+                    k <- identifier
+                    unexpected $ "key " ++ show k
+                -- Key is good
+                Just o@(ConfigOption {..}) -> do
+                    when (key `elem` ks) $ unexpected ("duplicate key " ++ show key)
+                    case mbv of
+                        -- Value is bad
+                        Nothing -> do
+                            _ <- actionParser o -- This should error out, but...
+                            parserFail $ "Couldn't parse value for key " ++ show key
+                        -- Value is good
+                        Just f -> actionParser o >> go (key:ks) (f c)
 
 -- Parse a config file from 'Text'.
 parseFromText :: ConfigParser c -> SourceName -> T.Text -> Either ParseError c

@@ -1,8 +1,9 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RankNTypes #-}
+{-# OPTIONS_HADDOCK hide #-}
 module Text.ConfigParser.Types where
 
-import Text.Parsec (string, spaces, char, (<?>))
+import Text.Parsec (spaces, char)
 import Text.Parsec.Text (Parser)
 
 type Key = String
@@ -24,7 +25,7 @@ requiredCO k = ConfigOption k True
 -- the 'ConfigParser' constructor if you want to specify your own 'lineParser'
 -- or 'commentStart'. Otherwise, use the 'configParser' smart constructor.
 data ConfigParser c = ConfigParser
-    { keyValue :: forall a. Key -> Parser a -> Parser a
+    { keyValue :: forall a. Parser Key -> Parser a -> Parser a
       -- ^ Specifies how a key and a value parser should be represented in the
       -- config file, e.g., @key = value@, or @key: value@.
     , lineCommentInit :: [String]
@@ -45,10 +46,9 @@ configParser :: c -> [ConfigOption c] -> ConfigParser c
 configParser = ConfigParser defaultKeyValue defaultLineCommentInit
 
 -- | Default syntax like @key = value@.
-defaultKeyValue :: Key -> Parser a -> Parser a
-defaultKeyValue k p = keyParser *> separator *> p
+defaultKeyValue :: Parser Key -> Parser a -> Parser a
+defaultKeyValue k p = k *> separator *> p
     where
-    keyParser = string k <?> "key \"" ++ k ++ "\""
     separator = spaces *> char '=' <* spaces
 
 -- | Default line comment like @# comment text@.

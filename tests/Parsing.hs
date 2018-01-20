@@ -6,8 +6,8 @@ module Main where
 import Prelude hiding (unlines)
 
 import Control.Lens
-import Control.Monad (void)
 import Data.Int (Int8)
+import Data.List.Extra (isInfixOf)
 import Data.Text (unlines)
 import Data.Word (Word8)
 import Test.Hspec
@@ -17,8 +17,7 @@ import Text.Parsec.Text (Parser)
 import qualified Text.Parsec as P (string)
 
 import Text.ConfigParser
-import Text.ConfigParser.Parser (whitespace, actionParser, removeLineComments)
-import Text.ConfigParser.Parser (removeExtraSpaces, removeExtraLines)
+import Text.ConfigParser.Parser (removeLineComments)
 
 data C = C
     { _f1 :: String
@@ -101,8 +100,8 @@ badcp = configParser defC [co1,co2,co2,co4,co5,co6,co7]
 cp    = configParser defC [co1,co2,co3,co4,co5,co6,co7]
 cp'   = ConfigParser lp lcs defC [co1,co2,co3,co4,co5,co6,co7]
     where
-    lp :: Key -> Parser a -> Parser a
-    lp k q = q <* spaces <* P.string "->" <* spaces <* P.string k
+    lp :: Parser Key -> Parser a -> Parser a
+    lp k q = q <* spaces <* P.string "->" <* spaces <* k
     lcs    = ["--","//"]
 
 shouldFailOnLine :: Show a => Either ParseError a -> Int -> Expectation
@@ -118,10 +117,7 @@ main = mapM_ hspec
     , testBool
     , testList
     , testDefaultKeyValue
-    , testActionParser
     , testRemoveLineComments
-    , testRemoveExtraSpaces
-    , testRemoveExtraLines
     , testConfig
     ]
 
@@ -252,51 +248,29 @@ testList = describe "list" $ do
     it "fails on an unterminated list after a comma" $
         parse (list integer) "test" "[42," `shouldFailOnLine` 1
 
-testWhitespace :: Spec
-testWhitespace = describe "whitespace" $ do
-    it "parses spaces" $
-        parse whitespace "test" "       " `shouldBe` Right ()
-    it "parses tabs" $
-        parse whitespace "test" "\t\t\t\t" `shouldBe` Right ()
-    it "parses a mix of spaces and tabs" $
-        parse whitespace "test" "  \t \t  \t\t " `shouldBe` Right ()
-    it "fails on newlines" $
-        parse (whitespace <* eof) "test" "\n" `shouldFailOnLine` 1
-    it "fails on carriage return" $
-        parse (whitespace <* eof) "test" "\r" `shouldFailOnLine` 1
-
 testDefaultKeyValue :: Spec
 testDefaultKeyValue = describe "defaultKeyValue" $ do
     it "parses \"<key>=<value>\"" $
-        parse (defaultKeyValue "foo" integer) "test" "foo=42"
+        parse (defaultKeyValue (P.string "foo") integer) "test" "foo=42"
             `shouldBe` Right 42
     it "parses \"<key> = <value>\"" $
-        parse (defaultKeyValue "foo" integer) "test" "foo = 42"
+        parse (defaultKeyValue (P.string "foo") integer) "test" "foo = 42"
             `shouldBe` Right 42
     it "parses \"<key>\\t=\\t<value>\"" $
-        parse (defaultKeyValue "foo" integer) "test" "foo\t=\t42"
+        parse (defaultKeyValue (P.string "foo") integer) "test" "foo\t=\t42"
             `shouldBe` Right 42
     it "parses \"<key>\\n=\\n<value>\"" $
-        parse (defaultKeyValue "foo" integer) "test" "foo\n=\n42"
+        parse (defaultKeyValue (P.string "foo") integer) "test" "foo\n=\n42"
             `shouldBe` Right 42
     it "parses \"<key>\\n  =\\n  <value>\"" $
-        parse (defaultKeyValue "foo" integer) "test" "foo\n  =\n  42"
+        parse (defaultKeyValue (P.string "foo") integer) "test" "foo\n  =\n  42"
             `shouldBe` Right 42
     it "parses \"<key>  \\n=  \\n<value>\"" $
-        parse (defaultKeyValue "foo" integer) "test" "foo  \n=  \n42"
+        parse (defaultKeyValue (P.string "foo") integer) "test" "foo  \n=  \n42"
             `shouldBe` Right 42
     it "fails on incorrect key" $
-        parse (defaultKeyValue "foo" integer) "test" "bar = 42"
+        parse (defaultKeyValue (P.string "foo") integer) "test" "bar = 42"
             `shouldFailOnLine` 1
-
-testActionParser :: Spec
-testActionParser = describe "actionParser" $ do
-    it "doesn't require whitespace at the start of a line" $
-        parse (actionParser' co2) "test" "f2 = 42" `shouldBe` Right ()
-    it "allows whitespace at the start of a line" $
-        parse (actionParser' co2) "test" "   f2 = 42" `shouldBe` Right ()
-    where
-    actionParser' = void . actionParser cp
 
 testRemoveLineComments :: Spec
 testRemoveLineComments = describe "removeLineComments" $ do
@@ -363,67 +337,6 @@ testRemoveLineComments = describe "removeLineComments" $ do
         parse removeLineComments' "test" "#foobaz\\#asdf " `shouldBe` Right "\n"
     where
     removeLineComments' = removeLineComments cp >> getInput
-
-testRemoveExtraSpaces :: Spec
-testRemoveExtraSpaces = describe "removeExtraSpaces" $ do
-    it "preserves an empty file" $
-        parse removeExtraSpaces' "test" "" `shouldBe` Right ""
-    it "preserves a file with one simple line" $
-        parse removeExtraSpaces' "test" "foobaz" `shouldBe` Right "foobaz"
-    it "preserves spaces in the middle of a simple line" $
-        parse removeExtraSpaces' "test" "foo   baz" `shouldBe` Right "foo   baz"
-    it "preserves a simple multiline file" $
-        parse removeExtraSpaces' "test" "foo\nbar\nzap"
-            `shouldBe` Right "foo\nbar\nzap"
-    it "preserves a multiline file with spaces" $
-        parse removeExtraSpaces' "test" "foo\nwiz   woz\nzap"
-            `shouldBe` Right "foo\nwiz   woz\nzap"
-    it "removes space alternatives" $
-        parse removeExtraSpaces' "test" " \t\r\vbaz" `shouldBe` Right "baz"
-    it "removes spaces at the start of a simple line" $
-        parse removeExtraSpaces' "test" "   baz" `shouldBe` Right "baz"
-    it "removes spaces at the end of a simple line" $
-        parse removeExtraSpaces' "test" "foo   " `shouldBe` Right "foo"
-    it "removes spaces at the start of a multi-line file" $
-        parse removeExtraSpaces' "test" "   foo\nwiz woz\nzap"
-            `shouldBe` Right "foo\nwiz woz\nzap"
-    it "removes spaces at the end of a multi-line file" $
-        parse removeExtraSpaces' "test" "foo\nwiz woz\nzap   "
-            `shouldBe` Right "foo\nwiz woz\nzap"
-    it "removes spaces at the start of a line in a multi-line file" $
-        parse removeExtraSpaces' "test" "foo\n   wiz woz\nzap"
-            `shouldBe` Right "foo\nwiz woz\nzap"
-    it "removes spaces at the end of a line in a multi-line file" $
-        parse removeExtraSpaces' "test" "foo\nwiz woz   \nzap"
-            `shouldBe` Right "foo\nwiz woz\nzap"
-    where
-    removeExtraSpaces' = removeExtraSpaces >> getInput
-
-testRemoveExtraLines :: Spec
-testRemoveExtraLines = describe "removeExtraLines" $ do
-    it "preserves an empty file" $
-        parse removeExtraLines' "test" "" `shouldBe` Right ""
-    it "preserves a file with one simple line" $
-        parse removeExtraLines' "test" "foobaz" `shouldBe` Right "foobaz"
-    it "preserves spaces in the middle of a simple line" $
-        parse removeExtraLines' "test" "foo   baz" `shouldBe` Right "foo   baz"
-    it "preserves a simple multiline file" $
-        parse removeExtraLines' "test" "foo\nbar\nzap"
-            `shouldBe` Right "foo\nbar\nzap"
-    it "preserves a multiline file with spaces" $
-        parse removeExtraLines' "test" "foo\nwiz   woz\nzap"
-            `shouldBe` Right "foo\nwiz   woz\nzap"
-    it "removes newlines at the start of a multi-line file" $
-        parse removeExtraLines' "test" "\n\n\nfoo\nwiz woz\nzap"
-            `shouldBe` Right "foo\nwiz woz\nzap"
-    it "removes newlines at the end of a multi-line file" $
-        parse removeExtraLines' "test" "foo\nwiz woz\nzap\n\n\n"
-            `shouldBe` Right "foo\nwiz woz\nzap"
-    it "removes newlines in the middle of a multi-line file" $
-        parse removeExtraLines' "test" "foo\nwiz woz\n\n\nzap"
-            `shouldBe` Right "foo\nwiz woz\nzap"
-    where
-    removeExtraLines' = removeExtraLines >> getInput
 
 testConfig :: Spec
 testConfig = describe "config" $ do
@@ -763,7 +676,7 @@ testConfig = describe "config" $ do
             ]) `shouldSatisfy` \res -> case res of
                 Right _ -> False
                 Left  e -> sourceLine (errorPos e) == 6
-                        && "unexpected key: \"badkey\"" `elem` lines (show e)
+                        && "unexpected key \"badkey\"" `isInfixOf` show e
     it "errors on duplicate keys in config file with a pertinent message" $
         parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
@@ -771,4 +684,4 @@ testConfig = describe "config" $ do
             ]) `shouldSatisfy` \res -> case res of
                 Right _ -> False
                 Left  e -> sourceLine (errorPos e) == 2
-                        && "unexpected duplicate key: \"f1\"" `elem` lines (show e)
+                        && "duplicate key \"f1\"" `isInfixOf` show e
