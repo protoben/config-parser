@@ -40,9 +40,10 @@ integer = read .: (++) <$> sign <*> many1 digit <?> "integer"
 -- | Parse a bounded integer. Fail to parse with a descriptive message if the
 -- value is out of bounds.
 boundedIntegral :: forall n. (Show n, Bounded n, Integral n) => Parser n
-boundedIntegral = bound =<< integer
-              <?> "integer between " ++ show intMin ++ " and " ++ show intMax
+boundedIntegral = try bounded
+            <?> "integer between " ++ show intMin ++ " and " ++ show intMax
     where
+    bounded = bound =<< integer
     intMin  = minBound :: n
     intMax  = maxBound :: n
     bound n | n > fromIntegral intMax = unexpected $ "integer above " ++ show intMax
@@ -106,7 +107,7 @@ config p = do
     maybeP parser  = Just <$> try parser <|> Nothing <$ try identifier
     optionParsers  = choice $ try . keyActionP <$> options p
     dummyActionP   = (Nothing,Nothing) <$ keyValue p identifier (try line)
-    configLineP    = optionParsers <|> dummyActionP <|> parserFail "Parsing failed"
+    configLineP    = (optionParsers <|> try dummyActionP) <* whitespace <* (void newline <|> eof)
     keyActionP o   = (Just o,) <$> mbActionParser o
     actionParser   ConfigOption {..} = keyValue p (P.string key) $ action <$> parser
     mbActionParser ConfigOption {..} = keyValue p (P.string key) . maybeP $ action <$> parser
@@ -114,12 +115,12 @@ config p = do
     go' ks c = (ks,c) <$ eof     -- End of document
           <|> newline *> go ks c -- Empty line
           <|> do                 -- Config line
-            (mbo,mbv) <- lookAhead configLineP
+            (mbo,mbv) <- lookAhead configLineP <|> parserFail "Parsing failed"
             case mbo of
                 -- Key is bad
                 Nothing -> do 
-                    k <- identifier
-                    unexpected $ "key " ++ show k
+                    k <- lookAhead identifier
+                    unexpected $ "unknown key " ++ show k
                 -- Key is good
                 Just o@(ConfigOption {..}) -> do
                     when (key `elem` ks) $ unexpected ("duplicate key " ++ show key)
