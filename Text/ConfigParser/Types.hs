@@ -32,9 +32,9 @@ data ConfigParser c = ConfigParser
       -- ^ Strings to start a line comment, such as @#@, @--@, or @//@. All
       -- characters following this string up to the following newline or EOF
       -- will be removed. You can use the string without starting a comment by
-      -- escaping it with a backslash, e.g. @\#@ or @\--@.
+      -- escaping it with a backslash, e.g. @\\#@ or @\\--@.
     , defaults :: c
-      -- ^ Initial @c@ to fold each 'ConfigOption's action over.
+      -- ^ Initial @c@ to fold each 'ConfigOption' action over.
     , options :: [ConfigOption c]
       -- ^ List of key-value pairs to parse from the config file. Any key in the
       -- config file that doesn't appear here will result in parse error.
