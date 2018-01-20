@@ -61,13 +61,7 @@ as follows:
 > main :: IO ()
 > main = parseFromFile cp "./config.txt" >>= print
 -}
-{-# OPTIONS_HADDOCK ignore_exports #-}
 module Text.ConfigParser
-    ( module Types
-    , module Parser
-    ) where
-
-import Text.ConfigParser.Types as Types
     ( Key
     , ConfigOption(..)
     , ConfigParser(..)
@@ -76,10 +70,7 @@ import Text.ConfigParser.Types as Types
     , configParser
     , defaultKeyValue
     , defaultLineCommentInit
-    )
-
-import Text.ConfigParser.Parser as Parser
-    ( config
+    , config
     , string
     , integer
     , boundedIntegral
@@ -87,4 +78,7 @@ import Text.ConfigParser.Parser as Parser
     , list
     , parseFromText
     , parseFromFile
-    )
+    ) where
+
+import Text.ConfigParser.Types as Types
+import Text.ConfigParser.Parser as Parser
