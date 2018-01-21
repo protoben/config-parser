@@ -1,5 +1,11 @@
 # Revision history for config-parser
 
+## 1.2.0.0  -- 2018-1-20
+
+* Fixed incorrect parsing error when invalid key appeared at beginning of file.
+* Added `keyIdentifier` field to `ConfigParser` to facilitate more accurate
+  invalid-key messages.
+
 ## 1.1.0.1  -- 2018-1-20
 
 * Fixed some unexpected parsing behavior w/r/t line-ends.
