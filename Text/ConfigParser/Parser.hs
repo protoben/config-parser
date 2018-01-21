@@ -101,12 +101,11 @@ config p = do
     where
     whitespace     = void . many  $ oneOf " \t\v\r"     :: Parser ()
     line           =        many  $ noneOf "\n\r"       :: Parser String
-    identifier     =        many1 $ noneOf "\n\r\t\v =" :: Parser String
     requiredKeys   = fmap key . filter required $ options p
     optionKeysUniq = length (nub $ key <$> options p) == length (options p)
-    maybeP parser  = Just <$> try parser <|> Nothing <$ try identifier
+    maybeP parser  = Just <$> try parser <|> Nothing <$ try line
     optionParsers  = choice $ try . keyActionP <$> options p
-    dummyActionP   = (Nothing,Nothing) <$ keyValue p identifier (try line)
+    dummyActionP   = (Nothing,Nothing) <$ keyValue p (keyIdentifier p) (try line)
     configLineP    = (optionParsers <|> try dummyActionP) <* whitespace <* (void newline <|> eof)
     keyActionP o   = (Just o,) <$> mbActionParser o
     actionParser   ConfigOption {..} = keyValue p (P.string key) $ action <$> parser
@@ -119,7 +118,7 @@ config p = do
             case mbo of
                 -- Key is bad
                 Nothing -> do 
-                    k <- lookAhead identifier
+                    k <- keyIdentifier p
                     unexpected $ "unknown key " ++ show k
                 -- Key is good
                 Just o@(ConfigOption {..}) -> do

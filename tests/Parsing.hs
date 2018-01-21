@@ -5,14 +5,15 @@ module Main where
 
 import Prelude hiding (unlines)
 
-import Control.Lens
+import Control.Lens hiding (noneOf)
 import Data.Int (Int8)
 import Data.List.Extra (isInfixOf)
 import Data.Text (unlines)
 import Data.Word (Word8, Word16)
 import Test.Hspec
 import Text.Parsec (ParseError, errorPos, sourceLine, sourceColumn)
-import Text.Parsec (parse, eof, getInput, spaces)
+import Text.Parsec (parse, eof, getInput, spaces, many1)
+import Text.Parsec.Char (noneOf)
 import Text.Parsec.Text (Parser)
 import qualified Text.Parsec as P (string)
 
@@ -98,10 +99,11 @@ cp, cp', badcp, reqcp :: ConfigParser C
 reqcp = configParser defC [co1,co2,co3,co4,co5,co6,co7,co8]
 badcp = configParser defC [co1,co2,co2,co4,co5,co6,co7]
 cp    = configParser defC [co1,co2,co3,co4,co5,co6,co7]
-cp'   = ConfigParser lp lcs defC [co1,co2,co3,co4,co5,co6,co7]
+cp'   = ConfigParser lp lcs kid defC [co1,co2,co3,co4,co5,co6,co7]
     where
     lp :: Parser Key -> Parser a -> Parser a
     lp k q = q <* spaces <* P.string "->" <* spaces <* k
+    kid    = many1 (noneOf "\n\r")
     lcs    = ["--","//"]
 
 shouldFailOnLine :: Show a => Either ParseError a -> Int -> Expectation
@@ -638,7 +640,7 @@ testConfig = describe "config" $ do
                 , _f4 = ["foo","bar"]
                 , _f5 = [1,2,3,4,5]
                 }
-    it "parses an multiple comment syntaxes" $
+    it "parses multiple comment syntaxes" $
         parseFromText cp' "test" (unlines
             [ "\"foo\"           -> f1"
             , "9001              -> f2"
@@ -659,6 +661,26 @@ testConfig = describe "config" $ do
                 Right _ -> False
                 Left  e -> sourceLine (errorPos e) == 1
                         && "non-unique keys in ConfigParser" `isInfixOf` show e
+    it "errors appropriately when delimiter is missing in middle of file" $
+        parseFromText cp "test" "f1 \nf2 = 9001" `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  _ -> True
+    it "errors appropriately when delimiter is missing at end of file" $
+        parseFromText cp "test" "f1 " `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && sourceColumn (errorPos e) == 4
+                        && "\"=\"" `isInfixOf` show e
+    it "errors appropriately when value is missing in middle of file" $
+        parseFromText cp "test" "f1 = \nf2 = 9001" `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> "string in quotes" `isInfixOf` show e
+    it "errors appropriately when value is missing at end of file" $
+        parseFromText cp "test" "f1 = " `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && sourceColumn (errorPos e) == 6
+                        && "string in quotes" `isInfixOf` show e
     it "errors appropriately when full value can't be parsed in middle of file" $
         parseFromText cp "test" (unlines
             [ "f2 = 9001foo"
@@ -694,7 +716,53 @@ testConfig = describe "config" $ do
                 Right _ -> False
                 Left  e -> sourceLine (errorPos e) == 1
                         && "missing required keys: \"f8\"" `isInfixOf` show e
-    it "errors on non-existent keys with a pertinent message" $
+    it "errors on non-existent key alone with a pertinent message" $
+        parseFromText cp "test" "badkey = 9999"
+            `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && sourceColumn (errorPos e) == 7
+                        && "unknown key \"badkey\"" `isInfixOf` show e
+    it "errors on non-existent key with initial spaces with a pertinent message" $
+        parseFromText cp "test" "  \r\t\vbadkey = 9999"
+            `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && "unknown key \"badkey\"" `isInfixOf` show e
+    it "errors on non-existent key with final spaces with a pertinent message" $
+        parseFromText cp "test" "badkey = 9999  \r\t\v"
+            `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && sourceColumn (errorPos e) == 7
+                        && "unknown key \"badkey\"" `isInfixOf` show e
+    it "errors on non-existent keys at start of input with a pertinent message" $
+        parseFromText cp "test" (unlines
+            [ "badkey = 9999"
+            , "f1 = \"foo\""
+            , "f2 = 9001"
+            , "f3 = True   "
+            , "f4 = [\"foo\",\"bar\"]"
+            , "f5 = [1,2,3,4,5]"
+            ]) `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 1
+                        && sourceColumn (errorPos e) == 7
+                        && "unknown key \"badkey\"" `isInfixOf` show e
+    it "errors on non-existent keys in middle of input with a pertinent message" $
+        parseFromText cp "test" (unlines
+            [ "f1 = \"foo\""
+            , "f2 = 9001"
+            , "f3 = True   "
+            , "badkey = 9999"
+            , "f4 = [\"foo\",\"bar\"]"
+            , "f5 = [1,2,3,4,5]"
+            ]) `shouldSatisfy` \res -> case res of
+                Right _ -> False
+                Left  e -> sourceLine   (errorPos e) == 4
+                        && sourceColumn (errorPos e) == 7
+                        && "unknown key \"badkey\"" `isInfixOf` show e
+    it "errors on non-existent keys at end of input with a pertinent message" $
         parseFromText cp "test" (unlines
             [ "f1 = \"foo\""
             , "f2 = 9001"
@@ -705,7 +773,7 @@ testConfig = describe "config" $ do
             ]) `shouldSatisfy` \res -> case res of
                 Right _ -> False
                 Left  e -> sourceLine   (errorPos e) == 6
-                        && sourceColumn (errorPos e) == 1
+                        && sourceColumn (errorPos e) == 7
                         && "unknown key \"badkey\"" `isInfixOf` show e
     it "errors on duplicate keys in config file with a pertinent message" $
         parseFromText cp "test" (unlines

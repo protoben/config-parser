@@ -3,7 +3,8 @@
 {-# OPTIONS_HADDOCK hide #-}
 module Text.ConfigParser.Types where
 
-import Text.Parsec (spaces, char)
+import Text.Parsec (spaces, char, many1)
+import Text.Parsec.Char (noneOf)
 import Text.Parsec.Text (Parser)
 
 type Key = String
@@ -27,12 +28,20 @@ requiredCO k = ConfigOption k True
 data ConfigParser c = ConfigParser
     { keyValue :: forall a. Parser Key -> Parser a -> Parser a
       -- ^ Specifies how a key and a value parser should be represented in the
-      -- config file, e.g., @key = value@, or @key: value@.
+      -- config file, e.g., @key = value@, or @key: value@. The first parameter
+      -- will be either be 'Text.Parsec.string (key (co::ConfigOption c))' or
+      -- @keyIdentifier@. The second parameter will be
+      -- 'parser (co::ConfigOption c)'.
     , lineCommentInit :: [String]
       -- ^ Strings to start a line comment, such as @#@, @--@, or @//@. All
       -- characters following this string up to the following newline or EOF
       -- will be removed. You can use the string without starting a comment by
       -- escaping it with a backslash, e.g. @\\#@ or @\\--@.
+    , keyIdentifier :: Parser Key
+      -- ^ This is the general form of an identifier to be passed as the first
+      -- parameter of @keyValue@. Having a general form allows us to correctly
+      -- detect invalid (e.g., typoed) keys. For example, the @keyIdentifier@
+      -- corresponding to @defaultKeyValue@ is 'many1 (noneOf "\r\v\n\t =")'.
     , defaults :: c
       -- ^ Initial @c@ to fold each 'ConfigOption' action over.
     , options :: [ConfigOption c]
@@ -43,7 +52,12 @@ data ConfigParser c = ConfigParser
 -- | Smart constructor for a 'ConfigParser' that uses a default syntax like
 -- @key = value@ and line comments starting with @#@.
 configParser :: c -> [ConfigOption c] -> ConfigParser c
-configParser = ConfigParser defaultKeyValue defaultLineCommentInit
+configParser =
+    ConfigParser defaultKeyValue defaultLineCommentInit defaultKeyIdentifier
+
+-- | The @keyIdentifier@ corresponding to @defaultKeyValue@.
+defaultKeyIdentifier :: Parser Key
+defaultKeyIdentifier = many1 $ noneOf "\n\t\r\v ="
 
 -- | Default syntax like @key = value@.
 defaultKeyValue :: Parser Key -> Parser a -> Parser a
